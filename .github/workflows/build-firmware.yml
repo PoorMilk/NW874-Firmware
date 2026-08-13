@@ -3,7 +3,7 @@ name: Build 360T7 ImmortalWrt Firmware
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 18 * * 6' # 每周日北京时间凌晨2点自动编译一次
+    - cron: '0 1 * * *' # 每天北京时间上午 9:00 (UTC 1:00) 自动触发编译
 
 permissions:
   contents: write
@@ -13,7 +13,8 @@ env:
   REPO_URL: https://github.com/PoorMilk/NW874-ImmortalWrt
   REPO_BRANCH: main
   CONFIG_FILE: .config
-  DIY_SH: diy.sh
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
   TZ: Asia/Shanghai
 
 jobs:
@@ -32,7 +33,7 @@ jobs:
           sudo -E apt-get install -y build-essential clang flex bison gsettings-desktop-schemas \
             gzpack python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev \
             libtool lzma-dev python3-pyelftools python3-yaml subversion uglifyjs git-core asciidoc \
-            xmlto digestit gettext xsltproc libz-dev rsync
+            xmlto digestit gettext xsltproc libz-dev rsync ccache
           sudo timedatectl set-timezone "${{ env.TZ }}"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
@@ -40,9 +41,29 @@ jobs:
       - name: Clone Source Code
         working-directory: /workdir
         run: |
-          df -h
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+
+      - name: Cache OpenWrt DL Packages
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/include/scan.mk') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-dl-
+
+      - name: Cache Ccache Intermediates
+        uses: actions/cache@v4
+        with:
+          path: openwrt/.ccache
+          key: ${{ runner.os }}-openwrt-ccache-${{ hashFiles('openwrt/target/linux/**/Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-ccache-
+
+      - name: Load Custom Feeds (DIY Part 1)
+        run: |
+          chmod +x ${{ env.DIY_P1_SH }}
+          $GITHUB_WORKSPACE/${{ env.DIY_P1_SH }}
 
       - name: Update & Install Feeds
         working-directory: ./openwrt
@@ -50,12 +71,14 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Load Custom Configuration & DIY Script
+      - name: Load Custom Configuration & DIY Part 2
         run: |
           [ -e ${{ env.CONFIG_FILE }} ] && cp -f ${{ env.CONFIG_FILE }} openwrt/.config
-          chmod +x ${{ env.DIY_SH }}
+          chmod +x ${{ env.DIY_P2_SH }}
           cd openwrt
-          $GITHUB_WORKSPACE/${{ env.DIY_SH }}
+          $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
+          # 开启 Ccache 加速配置开关
+          echo "CONFIG_CCACHE=y" >> .config
 
       - name: Download Package Options
         working-directory: ./openwrt
@@ -74,10 +97,8 @@ jobs:
         working-directory: ./openwrt
         run: |
           mkdir -p $GITHUB_WORKSPACE/release
-          # 筛选 sysupgrade 和 factory 镜像文件
           cp -f bin/targets/mediatek/mt7981/*sysupgrade.bin $GITHUB_WORKSPACE/release/ 2>/dev/null || true
           cp -f bin/targets/mediatek/mt7981/*factory.bin $GITHUB_WORKSPACE/release/ 2>/dev/null || true
-          
           cd $GITHUB_WORKSPACE/release
           sha256sum * > sha256sums.txt 2>/dev/null || true
 
