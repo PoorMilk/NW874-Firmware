@@ -3,7 +3,7 @@ name: Build 360T7 ImmortalWrt Firmware
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 1 * * *' # 每天北京时间上午 9:00 (UTC 1:00) 自动触发编译
+    - cron: '0 1 * * *'
 
 permissions:
   contents: write
@@ -22,10 +22,10 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout Workflow Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Initialization Environment
+      - name: Initialize Environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -41,24 +41,24 @@ jobs:
       - name: Clone Source Code
         working-directory: /workdir
         run: |
-          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
-          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
+          ln -sf /workdir/immortalwrt $GITHUB_WORKSPACE/immortalwrt
 
-      - name: Cache OpenWrt DL Packages
+      - name: Cache ImmortalWrt DL Packages
         uses: actions/cache@v4
         with:
-          path: openwrt/dl
-          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/include/scan.mk') }}
+          path: immortalwrt/dl
+          key: ${{ runner.os }}-immortalwrt-dl-${{ hashFiles('immortalwrt/include/scan.mk') }}
           restore-keys: |
-            ${{ runner.os }}-openwrt-dl-
+            ${{ runner.os }}-immortalwrt-dl-
 
       - name: Cache Ccache Intermediates
         uses: actions/cache@v4
         with:
-          path: openwrt/.ccache
-          key: ${{ runner.os }}-openwrt-ccache-${{ hashFiles('openwrt/target/linux/**/Makefile') }}
+          path: immortalwrt/.ccache
+          key: ${{ runner.os }}-immortalwrt-ccache-${{ hashFiles('immortalwrt/target/linux/**/Makefile') }}
           restore-keys: |
-            ${{ runner.os }}-openwrt-ccache-
+            ${{ runner.os }}-immortalwrt-ccache-
 
       - name: Load Custom Feeds (DIY Part 1)
         run: |
@@ -66,45 +66,45 @@ jobs:
           $GITHUB_WORKSPACE/${{ env.DIY_P1_SH }}
 
       - name: Update & Install Feeds
-        working-directory: ./openwrt
+        working-directory: ./immortalwrt
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: Load Custom Configuration & DIY Part 2
         run: |
-          [ -e ${{ env.CONFIG_FILE }} ] && cp -f ${{ env.CONFIG_FILE }} openwrt/.config
+          [ -e ${{ env.CONFIG_FILE }} ] && cp -f ${{ env.CONFIG_FILE }} immortalwrt/.config
           chmod +x ${{ env.DIY_P2_SH }}
-          cd openwrt
+          cd immortalwrt
           $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
-          # 开启 Ccache 加速配置开关
           echo "CONFIG_CCACHE=y" >> .config
 
       - name: Download Package Options
-        working-directory: ./openwrt
+        working-directory: ./immortalwrt
         run: |
           make defconfig
           make download -j8
           find dl -size -1024c -exec rm -f {} \;
 
       - name: Compile Firmware
-        working-directory: ./openwrt
+        working-directory: ./immortalwrt
         run: |
-          echo -e "$(nproc) thread compile"
           make -j$(nproc) || make -j1 || make -j1 V=s
 
       - name: Organize Firmware Artifacts
-        working-directory: ./openwrt
+        working-directory: ./immortalwrt
         run: |
           mkdir -p $GITHUB_WORKSPACE/release
-          cp -f bin/targets/mediatek/mt7981/*sysupgrade.bin $GITHUB_WORKSPACE/release/ 2>/dev/null || true
-          cp -f bin/targets/mediatek/mt7981/*factory.bin $GITHUB_WORKSPACE/release/ 2>/dev/null || true
+          SYS_FILE=$(find bin/targets/mediatek/mt7981/ -name "*sysupgrade.bin" | head -n 1)
+          FAC_FILE=$(find bin/targets/mediatek/mt7981/ -name "*factory.bin" | head -n 1)
+          [ -n "$SYS_FILE" ] && cp -f "$SYS_FILE" $GITHUB_WORKSPACE/release/NW874-sysupgrade.bin
+          [ -n "$FAC_FILE" ] && cp -f "$FAC_FILE" $GITHUB_WORKSPACE/release/NW874-factory.bin
           cd $GITHUB_WORKSPACE/release
           sha256sum * > sha256sums.txt 2>/dev/null || true
 
       - name: Generate Tag & Release Name
         run: |
-          echo "TAG_NAME=360T7-$(date +'%Y%m%d_%H%M')" >> $GITHUB_ENV
+          echo "TAG_NAME=360T7-$(date +'%Y-%m-%d_%H-%M')" >> $GITHUB_ENV
           echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
       - name: Upload Firmware to GitHub Release
@@ -114,10 +114,8 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
           body: |
-            ### 360T7 ImmortalWrt 自定义固件
-            * **源码来源**: ${{ env.REPO_URL }}
-            * **编译时间**: ${{ env.RELEASE_NAME }}
-            * **适配硬件**: 360 T7 (MT7981)
+            * **最新升级固件**: https://github.com/${{ github.repository }}/releases/latest/download/NW874-sysupgrade.bin
+            * **最新刷机固件**: https://github.com/${{ github.repository }}/releases/latest/download/NW874-factory.bin
           generate_release_notes: false
 
       - name: Keep Latest 5 Releases
