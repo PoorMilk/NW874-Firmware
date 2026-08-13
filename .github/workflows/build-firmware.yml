@@ -1,0 +1,121 @@
+name: Build 360T7 ImmortalWrt Firmware
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * 6' # 每周日北京时间凌晨2点自动编译一次
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  REPO_URL: https://github.com/PoorMilk/NW874-ImmortalWrt
+  REPO_BRANCH: main
+  CONFIG_FILE: .config
+  DIY_SH: diy.sh
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Workflow Repository
+        uses: actions/checkout@v4
+
+      - name: Initialization Environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get update
+          sudo -E apt-get install -y build-essential clang flex bison gsettings-desktop-schemas \
+            gzpack python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev \
+            libtool lzma-dev python3-pyelftools python3-yaml subversion uglifyjs git-core asciidoc \
+            xmlto digestit gettext xsltproc libz-dev rsync
+          sudo timedatectl set-timezone "${{ env.TZ }}"
+          sudo mkdir -p /workdir
+          sudo chown $USER:$GROUPS /workdir
+
+      - name: Clone Source Code
+        working-directory: /workdir
+        run: |
+          df -h
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+
+      - name: Update & Install Feeds
+        working-directory: ./openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Load Custom Configuration & DIY Script
+        run: |
+          [ -e ${{ env.CONFIG_FILE }} ] && cp -f ${{ env.CONFIG_FILE }} openwrt/.config
+          chmod +x ${{ env.DIY_SH }}
+          cd openwrt
+          $GITHUB_WORKSPACE/${{ env.DIY_SH }}
+
+      - name: Download Package Options
+        working-directory: ./openwrt
+        run: |
+          make defconfig
+          make download -j8
+          find dl -size -1024c -exec rm -f {} \;
+
+      - name: Compile Firmware
+        working-directory: ./openwrt
+        run: |
+          echo -e "$(nproc) thread compile"
+          make -j$(nproc) || make -j1 || make -j1 V=s
+
+      - name: Organize Firmware Artifacts
+        working-directory: ./openwrt
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/release
+          # 筛选 sysupgrade 和 factory 镜像文件
+          cp -f bin/targets/mediatek/mt7981/*sysupgrade.bin $GITHUB_WORKSPACE/release/ 2>/dev/null || true
+          cp -f bin/targets/mediatek/mt7981/*factory.bin $GITHUB_WORKSPACE/release/ 2>/dev/null || true
+          
+          cd $GITHUB_WORKSPACE/release
+          sha256sum * > sha256sums.txt 2>/dev/null || true
+
+      - name: Generate Tag & Release Name
+        run: |
+          echo "TAG_NAME=360T7-$(date +'%Y%m%d_%H%M')" >> $GITHUB_ENV
+          echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
+
+      - name: Upload Firmware to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          tag_name: ${{ env.TAG_NAME }}
+          name: ${{ env.RELEASE_NAME }}
+          body: |
+            ### 360T7 ImmortalWrt 自定义固件
+            * **源码来源**: ${{ env.REPO_URL }}
+            * **编译时间**: ${{ env.RELEASE_NAME }}
+            * **适配硬件**: 360 T7 (MT7981)
+          generate_release_notes: false
+
+      - name: Keep Latest 5 Releases
+        if: always()
+        run: |
+          gh api --paginate repos/${{ github.repository }}/releases \
+            --jq 'sort_by(.created_at) | reverse | .[5:] | .[]? | "\(.id) \(.tag_name)"' \
+            | while read -r id tag; do
+                if [ -n "$id" ]; then
+                  gh api -X DELETE repos/${{ github.repository }}/releases/$id || true
+                  gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$tag || true
+                fi
+              done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean Old Workflow Runs
+        if: always()
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          keep_minimum_runs: 5
