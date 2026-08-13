@@ -1,4 +1,4 @@
-name: Build 360T7 ImmortalWrt Firmware
+Name: Build 360T7 ImmortalWrt Firmware
 
 on:
   workflow_dispatch:
@@ -31,9 +31,9 @@ jobs:
         run: |
           sudo -E apt-get update
           sudo -E apt-get install -y build-essential clang flex bison gsettings-desktop-schemas \
-            gzpack python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev \
-            libtool lzma-dev python3-pyelftools python3-yaml subversion uglifyjs git-core asciidoc \
-            xmlto digestit gettext xsltproc libz-dev rsync ccache
+            python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev \
+            libtool lzma-dev python3-pyelftools python3-yaml subversion uglifyjs git asciidoc \
+            xmlto gettext xsltproc libz-dev rsync ccache zlib1g-dev
           sudo timedatectl set-timezone "${{ env.TZ }}"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
@@ -138,3 +138,4 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           keep_minimum_runs: 5
+
