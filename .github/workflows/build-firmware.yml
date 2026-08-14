@@ -1,4 +1,4 @@
-Name: Build 360T7 ImmortalWrt Firmware
+name: Build 360T7 Firmware
 
 on:
   workflow_dispatch:
@@ -19,24 +19,16 @@ env:
 
 jobs:
   build:
-    # 【修复1】：降级到最稳定的 22.04 编译环境
     runs-on: ubuntu-22.04
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Initialize Environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo -E apt-get update
-          # 【修复2】：补充了 gawk, unzip, libncurses-dev, gcc-multilib 等必备依赖
-          sudo -E apt-get install -y build-essential clang flex bison gsettings-desktop-schemas \
-            python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev \
-            libtool lzma-dev python3-pyelftools python3-yaml subversion uglifyjs git asciidoc \
-            xmlto gettext xsltproc libz-dev rsync ccache zlib1g-dev \
-            gawk unzip libncurses-dev gcc-multilib g++-multilib file wget
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison gsettings-desktop-schemas python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev libtool lzma-dev python3-pyelftools python3-yaml subversion uglifyjs git asciidoc xmlto gettext xsltproc libz-dev rsync ccache zlib1g-dev gawk unzip libncurses-dev gcc-multilib g++-multilib file wget
           sudo timedatectl set-timezone "${{ env.TZ }}"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
@@ -47,42 +39,30 @@ jobs:
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
           ln -sf /workdir/immortalwrt $GITHUB_WORKSPACE/immortalwrt
 
-      - name: Cache ImmortalWrt DL Packages
+      - name: Cache DL & Ccache
         uses: actions/cache@v4
         with:
-          path: immortalwrt/dl
-          key: ${{ runner.os }}-immortalwrt-dl-${{ hashFiles('immortalwrt/include/scan.mk') }}
+          path: |
+            immortalwrt/dl
+            immortalwrt/.ccache
+          key: ${{ runner.os }}-build-${{ hashFiles('immortalwrt/include/scan.mk') }}
           restore-keys: |
-            ${{ runner.os }}-immortalwrt-dl-
+            ${{ runner.os }}-build-
 
-      - name: Cache Ccache Intermediates
-        uses: actions/cache@v4
-        with:
-          path: immortalwrt/.ccache
-          key: ${{ runner.os }}-immortalwrt-ccache-${{ hashFiles('immortalwrt/target/linux/**/Makefile') }}
-          restore-keys: |
-            ${{ runner.os }}-immortalwrt-ccache-
-
-      - name: Load Custom Feeds (DIY Part 1)
+      - name: Update Feeds & Execute DIY Scripts
         run: |
-          chmod +x ${{ env.DIY_P1_SH }}
-          $GITHUB_WORKSPACE/${{ env.DIY_P1_SH }}
-
-      - name: Update & Install Feeds
-        working-directory: ./immortalwrt
-        run: |
+          chmod +x ${{ env.DIY_P1_SH }} ${{ env.DIY_P2_SH }}
+          ./${{ env.DIY_P1_SH }}
+          cd immortalwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-
-      - name: Load Custom Configuration & DIY Part 2
-        run: |
+          cd $GITHUB_WORKSPACE
           [ -e ${{ env.CONFIG_FILE }} ] && cp -f ${{ env.CONFIG_FILE }} immortalwrt/.config
-          chmod +x ${{ env.DIY_P2_SH }}
           cd immortalwrt
           $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
           echo "CONFIG_CCACHE=y" >> .config
 
-      - name: Download Package Options
+      - name: Download Packages
         working-directory: ./immortalwrt
         run: |
           make defconfig
@@ -94,46 +74,35 @@ jobs:
         run: |
           make -j$(nproc) || make -j1 || make -j1 V=s
 
-      - name: Organize Firmware Artifacts
-        working-directory: ./immortalwrt
+      - name: Prepare Artifacts & Tags
         run: |
-          mkdir -p $GITHUB_WORKSPACE/release
-          SYS_FILE=$(find bin/targets/mediatek/mt7981/ -name "*sysupgrade.bin" | head -n 1)
-          FAC_FILE=$(find bin/targets/mediatek/mt7981/ -name "*factory.bin" | head -n 1)
-          [ -n "$SYS_FILE" ] && cp -f "$SYS_FILE" $GITHUB_WORKSPACE/release/NW874-sysupgrade.bin
-          [ -n "$FAC_FILE" ] && cp -f "$FAC_FILE" $GITHUB_WORKSPACE/release/NW874-factory.bin
-          cd $GITHUB_WORKSPACE/release
+          mkdir -p release
+          find immortalwrt/bin/targets/mediatek/mt7981/ -name "*sysupgrade.bin" -exec cp {} release/NW874-sysupgrade.bin \;
+          find immortalwrt/bin/targets/mediatek/mt7981/ -name "*factory.bin" -exec cp {} release/NW874-factory.bin \;
+          cd release
           sha256sum * > sha256sums.txt 2>/dev/null || true
-
-      - name: Generate Tag & Release Name
-        run: |
-          echo "TAG_NAME=360T7-$(date +'%Y-%m-%d_%H-%M')" >> $GITHUB_ENV
+          echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
           echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
-      - name: Upload Firmware to GitHub Release
+      - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
-          body: |
-            * **最新升级固件**: https://github.com/${{ github.repository }}/releases/latest/download/NW874-sysupgrade.bin
-            * **最新刷机固件**: https://github.com/${{ github.repository }}/releases/latest/download/NW874-factory.bin
           generate_release_notes: false
 
-      - name: Keep Latest 5 Releases
+      - name: Clean Old Releases
         if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api --paginate repos/${{ github.repository }}/releases \
             --jq 'sort_by(.created_at) | reverse | .[5:] | .[]? | "\(.id) \(.tag_name)"' \
             | while read -r id tag; do
-                if [ -n "$id" ]; then
-                  gh api -X DELETE repos/${{ github.repository }}/releases/$id || true
-                  gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$tag || true
-                fi
+                [ -n "$id" ] && gh api -X DELETE repos/${{ github.repository }}/releases/$id || true
+                [ -n "$tag" ] && gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$tag || true
               done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean Old Workflow Runs
         if: always()
