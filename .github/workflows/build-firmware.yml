@@ -60,7 +60,12 @@ jobs:
           [ -e ${{ env.CONFIG_FILE }} ] && cp -f ${{ env.CONFIG_FILE }} immortalwrt/.config
           cd immortalwrt
           $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
-          echo "CONFIG_CCACHE=y" >> .config
+          cat <<EOF >> .config
+          CONFIG_CCACHE=y
+          CONFIG_PACKAGE_libiwinfo=y
+          CONFIG_PACKAGE_libiwinfo-data=y
+          CONFIG_PACKAGE_libiwinfo-lua=y
+          EOF
 
       - name: Download Packages
         working-directory: ./immortalwrt
