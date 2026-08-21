@@ -28,7 +28,11 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison gsettings-desktop-schemas python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev libtool python3-pyelftools python3-yaml subversion uglifyjs git asciidoc xmlto gettext xsltproc libz-dev rsync ccache zlib1g-dev gawk unzip libncurses-dev gcc-multilib g++-multilib file wget
+          sudo apt-get install -y build-essential clang flex bison gsettings-desktop-schemas \
+            python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev \
+            libtool python3-pyelftools python3-yaml subversion uglifyjs git asciidoc xmlto \
+            gettext xsltproc libz-dev rsync ccache zlib1g-dev gawk unzip libncurses-dev \
+            gcc-multilib g++-multilib file wget
           sudo timedatectl set-timezone "${{ env.TZ }}"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
@@ -52,13 +56,11 @@ jobs:
       - name: Update Feeds & Execute DIY Scripts
         run: |
           chmod +x ${{ env.DIY_P1_SH }} ${{ env.DIY_P2_SH }}
-          ./${{ env.DIY_P1_SH }}
           cd immortalwrt
+          $GITHUB_WORKSPACE/${{ env.DIY_P1_SH }}
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          cd $GITHUB_WORKSPACE
-          [ -e ${{ env.CONFIG_FILE }} ] && cp -f ${{ env.CONFIG_FILE }} immortalwrt/.config
-          cd immortalwrt
+          [ -e $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
           $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
           cat <<EOF >> .config
           CONFIG_CCACHE=y
@@ -82,8 +84,10 @@ jobs:
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          find immortalwrt/bin/targets/mediatek/mt7981/ -name "*sysupgrade.bin" -exec cp {} release/NW874-sysupgrade.bin \;
-          find immortalwrt/bin/targets/mediatek/mt7981/ -name "*factory.bin" -exec cp {} release/NW874-factory.bin \;
+          SYS_FILE=$(find immortalwrt/bin/targets/mediatek/mt7981/ -name "*sysupgrade.bin" | head -n 1)
+          FAC_FILE=$(find immortalwrt/bin/targets/mediatek/mt7981/ -name "*factory.bin" | head -n 1)
+          [ -n "$SYS_FILE" ] && cp -f "$SYS_FILE" release/NW874-sysupgrade.bin
+          [ -n "$FAC_FILE" ] && cp -f "$FAC_FILE" release/NW874-factory.bin
           cd release
           sha256sum * > sha256sums.txt 2>/dev/null || true
           echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
