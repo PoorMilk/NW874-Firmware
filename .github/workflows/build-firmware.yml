@@ -19,9 +19,11 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Workflow Repository
+        uses: actions/checkout@v4
 
       - name: Initialize Environment
         env:
@@ -62,12 +64,7 @@ jobs:
           ./scripts/feeds install -a
           [ -e $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
           $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
-          cat <<EOF >> .config
-          CONFIG_CCACHE=y
-          CONFIG_PACKAGE_libiwinfo=y
-          CONFIG_PACKAGE_libiwinfo-data=y
-          CONFIG_PACKAGE_libiwinfo-lua=y
-          EOF
+          echo "CONFIG_CCACHE=y" >> .config
 
       - name: Download Packages
         working-directory: ./immortalwrt
@@ -84,13 +81,13 @@ jobs:
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          SYS_FILE=$(find immortalwrt/bin/targets/mediatek/mt7981/ -name "*sysupgrade.bin" | head -n 1)
-          FAC_FILE=$(find immortalwrt/bin/targets/mediatek/mt7981/ -name "*factory.bin" | head -n 1)
+          SYS_FILE=$(find immortalwrt/bin/targets/mediatek/ -name "*sysupgrade.bin" | head -n 1)
+          FAC_FILE=$(find immortalwrt/bin/targets/mediatek/ -name "*factory.bin" | head -n 1)
           [ -n "$SYS_FILE" ] && cp -f "$SYS_FILE" release/NW874-sysupgrade.bin
           [ -n "$FAC_FILE" ] && cp -f "$FAC_FILE" release/NW874-factory.bin
           cd release
           sha256sum * > sha256sums.txt 2>/dev/null || true
-          echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
+          echo "TAG_NAME=360T7-$(date +'%Y-%m-%d_%H-%M')" >> $GITHUB_ENV
           echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
       - name: Upload Release
@@ -99,6 +96,9 @@ jobs:
           files: release/*
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
+          body: |
+            * **最新升级固件**: https://github.com/${{ github.repository }}/releases/latest/download/NW874-sysupgrade.bin
+            * **最新刷机固件**: https://github.com/${{ github.repository }}/releases/latest/download/NW874-factory.bin
           generate_release_notes: false
 
       - name: Clean Old Releases
