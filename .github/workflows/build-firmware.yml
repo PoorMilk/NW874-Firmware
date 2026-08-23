@@ -1,23 +1,22 @@
 name: Build 360T7 Firmware
 
-# 触发条件：支持手动触发与每日定时触发
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 1 * * *' # 每天 UTC 时间 01:00 (北京时间 09:00) 自动构建
+    - cron: '0 1 * * *'
 
-# 赋予工作流写入 Releases 和管理 Workflow Runs 的权限
 permissions:
   contents: write
   actions: write
 
 env:
-  REPO_URL: https://github.com/PoorMilk/NW874-ImmortalWrt # 源码仓库地址
-  REPO_BRANCH: main                                      # 源码分支
-  CONFIG_FILE: .config                                   # 种子配置文件名 (若为 seed.config 请修改此处)
-  DIY_P1_SH: diy-part1.sh                                # Feeds 刷新前执行的脚本
-  DIY_P2_SH: diy-part2.sh                                # Feeds 安装后、编译前执行的脚本 (如修改默认 IP)
-  TZ: Asia/Shanghai                                      # 时区设置
+  REPO_URL: https://github.com/PoorMilk/NW874-ImmortalWrt
+  REPO_BRANCH: main
+  CONFIG_FILE: .config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
+  TZ: Asia/Shanghai
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
 jobs:
   build:
@@ -25,13 +24,12 @@ jobs:
 
     steps:
       - name: Checkout Workflow Repository
-        uses: actions/checkout@v4 # 拉取当前配置仓库
+        uses: actions/checkout@v4
 
       - name: Initialize Environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          # 更新源并安装 OpenWrt/ImmortalWrt 编译所需的全部构建依赖
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison gsettings-desktop-schemas \
             python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev \
@@ -39,80 +37,81 @@ jobs:
             gettext xsltproc libz-dev rsync ccache zlib1g-dev gawk unzip libncurses-dev \
             gcc-multilib g++-multilib file wget
           sudo timedatectl set-timezone "${{ env.TZ }}"
-          # 创建独立工作目录以避免权限与路径深度问题
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
 
       - name: Clone Source Code
         working-directory: /workdir
         run: |
-          # 浅克隆指定分支的源码以节省下载时间
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
           ln -sf /workdir/immortalwrt $GITHUB_WORKSPACE/immortalwrt
 
+      - name: Cache DL & Ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            immortalwrt/dl
+            immortalwrt/.ccache
+          key: ${{ runner.os }}-build-${{ hashFiles('immortalwrt/include/scan.mk') }}
+          restore-keys: |
+            ${{ runner.os }}-build-
+
       - name: Update Feeds & Execute DIY Scripts
         run: |
-          # 运行 Part 1 自定义脚本 (添加额外插件源等)
-          [ -e ${{ env.DIY_P1_SH }} ] && chmod +x ${{ env.DIY_P1_SH }} && $GITHUB_WORKSPACE/${{ env.DIY_P1_SH }}
+          chmod +x ${{ env.DIY_P1_SH }} ${{ env.DIY_P2_SH }}
           cd immortalwrt
-          # 更新并安装软件源索引
+          $GITHUB_WORKSPACE/${{ env.DIY_P1_SH }}
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          # 拷贝仓库内的配置文件覆盖为编译用的 .config
           [ -e $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
-          # 运行 Part 2 自定义脚本 (修改默认 IP、版本号、DTS 等)
-          [ -e $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }} ] && chmod +x $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }} && $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
+          $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
+          echo "CONFIG_CCACHE=y" >> .config
 
       - name: Download Packages
         working-directory: ./immortalwrt
         run: |
-          # 根据 seed.config 补全并校验所有底层依赖
           make defconfig
-          # 预先多线程下载所有依赖包，避免编译过程中因网络波动中断
           make download -j8
-          # 检查并删除下载不完整 (<1KB) 的损坏依赖包
           find dl -size -1024c -exec rm -f {} \;
 
       - name: Compile Firmware
         working-directory: ./immortalwrt
         run: |
-          # 优先多线程全速编译；若出错自动降级为单线程输出详细排错日志 (V=s)
-          make -j$(nproc) || make -j1 V=s
+          make -j$(nproc) || make -j1 || make -j1 V=s
 
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          TARGET_DIR="immortalwrt/bin/targets/mediatek"
+          # 全局递归搜索生成的固件（兼容 targets 下不同的子架构目录结构）
+          SYS_FILE=$(find immortalwrt/bin/targets/ -type f -name "*sysupgrade.bin" | head -n 1)
+          FAC_FILE=$(find immortalwrt/bin/targets/ -type f -name "*factory.bin" | head -n 1)
 
-          # 精准定位 sysupgrade 升级固件
-          SYS_FILE=$(find $TARGET_DIR -type f -name "*360-t7*sysupgrade.bin" -o -name "*sysupgrade.bin" | head -n 1)
-          # 定位 factory / ubi / 首次刷机固件
-          FAC_FILE=$(find $TARGET_DIR -type f -name "*360-t7*factory*.bin" -o -name "*360-t7*ubi.bin" -o -name "*factory.bin" | head -n 1)
+          if [ -z "$SYS_FILE" ]; then
+            echo "❌ 错误：未在 immortalwrt/bin/targets/ 目录下找到编译生成的 sysupgrade 固件！"
+            echo "当前 targets 目录下的所有文件列表："
+            find immortalwrt/bin/targets/ -type f || true
+            exit 1
+          fi
 
-          # 统一重命名复制到发布目录
-          [ -n "$SYS_FILE" ] && cp -f "$SYS_FILE" release/NW874-sysupgrade.bin
+          cp -f "$SYS_FILE" release/NW874-sysupgrade.bin
           [ -n "$FAC_FILE" ] && cp -f "$FAC_FILE" release/NW874-factory.bin
 
-          # 生成 SHA256 校验文件以供刷机核对
           cd release
-          sha256sum * > sha256sums.txt 2>/dev/null || true
+          # 仅针对实际复制进来的 .bin 文件生成 sha256 校验码，防止产生 0 字节空文件
+          sha256sum *.bin > sha256sums.txt
 
-          # 设定 Release 标签与标题
           echo "TAG_NAME=360T7-$(date +'%Y-%m-%d_%H-%M')" >> $GITHUB_ENV
           echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2
-        if: env.TAG_NAME != ''
         with:
           files: release/*
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
           body: |
-            ### 360T7 (MT7981) 闭源固件构建完成
-            * **网页升级包 (Sysupgrade)**: `NW874-sysupgrade.bin`
-            * **U-Boot / 原厂刷机包 (Factory)**: `NW874-factory.bin`
-            * **完整校验信息**: 见附件 `sha256sums.txt`
+            * **最新升级固件**: https://github.com/${{ github.repository }}/releases/latest/download/NW874-sysupgrade.bin
+            * **最新刷机固件**: https://github.com/${{ github.repository }}/releases/latest/download/NW874-factory.bin
           generate_release_notes: false
 
       - name: Clean Old Releases
@@ -120,7 +119,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 仅保留最近 5 个 Release 发布，自动删除更早的版本及 Git Tags
           gh api --paginate repos/${{ github.repository }}/releases \
             --jq 'sort_by(.created_at) | reverse | .[5:] | .[]? | "\(.id) \(.tag_name)"' \
             | while read -r id tag; do
@@ -133,4 +131,4 @@ jobs:
         uses: Mattraks/delete-workflow-runs@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          keep_minimum_runs: 5 # 保留最近 5 次 GitHub Actions 执行记录
+          keep_minimum_runs: 5
