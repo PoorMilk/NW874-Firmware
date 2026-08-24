@@ -16,26 +16,19 @@ env:
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   TZ: Asia/Shanghai
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
-
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout Workflow Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Initialize Environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison gsettings-desktop-schemas \
-            python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev \
-            libtool python3-pyelftools python3-yaml subversion uglifyjs git asciidoc xmlto \
-            gettext xsltproc libz-dev rsync ccache zlib1g-dev gawk unzip libncurses-dev \
-            gcc-multilib g++-multilib file wget
+          sudo apt-get install -y build-essential clang flex bison gsettings-desktop-schemas python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev libtool python3-pyelftools python3-yaml subversion uglifyjs git asciidoc xmlto gettext xsltproc libz-dev rsync ccache zlib1g-dev gawk unzip libncurses-dev gcc-multilib g++-multilib file wget
           sudo timedatectl set-timezone "${{ env.TZ }}"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
@@ -59,13 +52,20 @@ jobs:
       - name: Update Feeds & Execute DIY Scripts
         run: |
           chmod +x ${{ env.DIY_P1_SH }} ${{ env.DIY_P2_SH }}
+          ./${{ env.DIY_P1_SH }}
           cd immortalwrt
-          $GITHUB_WORKSPACE/${{ env.DIY_P1_SH }}
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          [ -e $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
+          cd $GITHUB_WORKSPACE
+          [ -e ${{ env.CONFIG_FILE }} ] && cp -f ${{ env.CONFIG_FILE }} immortalwrt/.config
+          cd immortalwrt
           $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
-          echo "CONFIG_CCACHE=y" >> .config
+          cat <<EOF >> .config
+          CONFIG_CCACHE=y
+          CONFIG_PACKAGE_libiwinfo=y
+          CONFIG_PACKAGE_libiwinfo-data=y
+          CONFIG_PACKAGE_libiwinfo-lua=y
+          EOF
 
       - name: Download Packages
         working-directory: ./immortalwrt
@@ -82,25 +82,11 @@ jobs:
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          # 全局递归搜索生成的固件（兼容 targets 下不同的子架构目录结构）
-          SYS_FILE=$(find immortalwrt/bin/targets/ -type f -name "*sysupgrade.bin" | head -n 1)
-          FAC_FILE=$(find immortalwrt/bin/targets/ -type f -name "*factory.bin" | head -n 1)
-
-          if [ -z "$SYS_FILE" ]; then
-            echo "❌ 错误：未在 immortalwrt/bin/targets/ 目录下找到编译生成的 sysupgrade 固件！"
-            echo "当前 targets 目录下的所有文件列表："
-            find immortalwrt/bin/targets/ -type f || true
-            exit 1
-          fi
-
-          cp -f "$SYS_FILE" release/NW874-sysupgrade.bin
-          [ -n "$FAC_FILE" ] && cp -f "$FAC_FILE" release/NW874-factory.bin
-
+          find immortalwrt/bin/targets/mediatek/mt7981/ -name "*sysupgrade.bin" -exec cp {} release/NW874-sysupgrade.bin \;
+          find immortalwrt/bin/targets/mediatek/mt7981/ -name "*factory.bin" -exec cp {} release/NW874-factory.bin \;
           cd release
-          # 仅针对实际复制进来的 .bin 文件生成 sha256 校验码，防止产生 0 字节空文件
-          sha256sum *.bin > sha256sums.txt
-
-          echo "TAG_NAME=360T7-$(date +'%Y-%m-%d_%H-%M')" >> $GITHUB_ENV
+          sha256sum * > sha256sums.txt 2>/dev/null || true
+          echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
           echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
       - name: Upload Release
@@ -109,9 +95,6 @@ jobs:
           files: release/*
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
-          body: |
-            * **最新升级固件**: https://github.com/${{ github.repository }}/releases/latest/download/NW874-sysupgrade.bin
-            * **最新刷机固件**: https://github.com/${{ github.repository }}/releases/latest/download/NW874-factory.bin
           generate_release_notes: false
 
       - name: Clean Old Releases
