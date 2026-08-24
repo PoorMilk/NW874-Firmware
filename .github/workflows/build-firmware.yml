@@ -82,8 +82,8 @@ jobs:
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          find immortalwrt/bin/targets/mediatek/mt7981/ -name "*sysupgrade.bin" -exec cp {} release/NW874-sysupgrade.bin \;
-          find immortalwrt/bin/targets/mediatek/mt7981/ -name "*factory.bin" -exec cp {} release/NW874-factory.bin \;
+          find immortalwrt/bin/targets/ -name "*sysupgrade.bin" -exec cp {} release/NW874-sysupgrade.bin \;
+          find immortalwrt/bin/targets/ -name "*factory.bin" -exec cp {} release/NW874-factory.bin \;
           cd release
           sha256sum * > sha256sums.txt 2>/dev/null || true
           echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
