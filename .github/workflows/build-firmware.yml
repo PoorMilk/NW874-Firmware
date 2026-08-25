@@ -11,7 +11,7 @@ permissions:
 
 env:
   REPO_URL: https://github.com/PoorMilk/NW874-ImmortalWrt
-  REPO_BRANCH: main
+  REPO_BRANCH: openwrt-24.10-6.6
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
@@ -61,12 +61,6 @@ jobs:
           [ -e ${{ env.CONFIG_FILE }} ] && cp -f ${{ env.CONFIG_FILE }} immortalwrt/.config
           cd immortalwrt
           $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
-          cat <<EOF >> .config
-          CONFIG_CCACHE=y
-          CONFIG_PACKAGE_libiwinfo=y
-          CONFIG_PACKAGE_libiwinfo-data=y
-          CONFIG_PACKAGE_libiwinfo-lua=y
-          EOF
 
       - name: Download Packages
         working-directory: ./immortalwrt
@@ -86,7 +80,7 @@ jobs:
           find immortalwrt/bin/targets/ -type f -name "*sysupgrade.bin" -exec cp {} release/NW874-sysupgrade.bin \;
           find immortalwrt/bin/targets/ -type f -name "*factory.bin" -exec cp {} release/NW874-factory.bin \;
           cd release
-          sha256sum * > sha256sums.txt
+          sha256sum *.bin > sha256sums.txt
           echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
           echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
