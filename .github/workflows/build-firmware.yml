@@ -77,11 +77,11 @@ jobs:
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          find immortalwrt/bin/targets/ -type f -exec cp -fv {} release/ \;
+          cp -rf immortalwrt/bin/targets/* release/ || true
           cd release
-          ls -lh
+          ls -Rlh
           if [ "$(ls -A .)" ]; then
-            sha256sum * > sha256sums.txt
+            date > build_time.txt
           else
             exit 1
           fi
@@ -91,7 +91,7 @@ jobs:
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*
+          files: release/**/*
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
           generate_release_notes: false
