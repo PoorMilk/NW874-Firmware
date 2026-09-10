@@ -60,6 +60,134 @@ jobs:
           ./scripts/feeds install -a
           [ -e $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
           echo "CONFIG_CCACHE=y" >> .config
+          echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> .config
+          echo "CONFIG_TARGET_ROOTFS_UBIFS=y" >> .config
+          echo "CONFIG_TARGET_ROOTFS_TARGZ=y" >> .config
+          $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
+
+      - name: Download Packages
+        working-directory: ./immortalwrt
+        run: |
+          make defconfig
+          make download -j8
+          find dl -size -1024c -exec rm -f {} \;
+
+      - name: Compile Firmware
+        working-directory: ./immortalwrt
+        run: |
+          make -j$(nproc) || make -j1 || make -j1 V=s
+
+      - name: Prepare Artifacts & Tags
+        run: |
+          mkdir -p release
+          cp -rf immortalwrt/bin/targets/* release/ || true
+          cd release
+          ls -Rlh
+          if [ "$(ls -A .)" ]; then
+            date > build_time.txt
+          else
+            exit 1
+          fi
+          echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
+          echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/**/*
+          tag_name: ${{ env.TAG_NAME }}
+          name: ${{ env.RELEASE_NAME }}
+          generate_release_notes: false
+
+      - name: Clean Old Releases
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --paginate repos/${{ github.repository }}/releases \
+            --jq 'sort_by(.created_at) | reverse | .[5:] | .[]? | "\(.id) \(.tag_name)"' \
+            | while read -r id tag; do
+                if [ -n "$id" ]; then
+                  gh api -X DELETE repos/${{ github.repository }}/releases/$id || true
+                  gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$tag || true
+                fi
+              done
+
+      - name: Clean Old Workflow Runs
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run list --repo "${{ github.repository }}" --limit 100 --json databaseId \
+            --jq '.[5:] | .[].databaseId' | while read -r run_id; do
+              if [ -n "$run_id" ]; then
+                gh run delete "$run_id" --repo "${{ github.repository }}" || true
+              fi
+            doneyaml_content = """name: Build 360T7 Firmware
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1 * * *'
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  REPO_URL: https://github.com/PoorMilk/NW874-ImmortalWrt
+  REPO_BRANCH: main
+  CONFIG_FILE: .config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -a -f || true
+
+      - name: Initialize Environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison gsettings-desktop-schemas python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev libtool python3-pyelftools python3-yaml subversion uglifyjs git asciidoc xmlto gettext xsltproc libz-dev rsync ccache zlib1g-dev gawk unzip libncurses-dev gcc-multilib g++-multilib file wget python3-ply
+          sudo timedatectl set-timezone "${{ env.TZ }}"
+
+      - name: Clone Source Code
+        run: |
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
+
+      - name: Cache DL & Ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            immortalwrt/dl
+            immortalwrt/.ccache
+          key: ${{ runner.os }}-build-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-build-
+
+      - name: Update Feeds & Execute DIY Scripts
+        run: |
+          chmod +x ${{ env.DIY_P1_SH }} ${{ env.DIY_P2_SH }}
+          cd immortalwrt
+          $GITHUB_WORKSPACE/${{ env.DIY_P1_SH }}
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          [ -e $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
+          echo "CONFIG_CCACHE=y" >> .config
+          echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> .config
+          echo "CONFIG_TARGET_ROOTFS_UBIFS=y" >> .config
+          echo "CONFIG_TARGET_ROOTFS_TARGZ=y" >> .config
           $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
 
       - name: Download Packages
