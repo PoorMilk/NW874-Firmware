@@ -47,7 +47,7 @@ jobs:
           path: |
             immortalwrt/dl
             immortalwrt/.ccache
-          key: ${{ runner.os }}-build-${{ hashFiles('immortalwrt/include/scan.mk') }}
+          key: ${{ runner.os }}-build-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-build-
 
@@ -77,8 +77,7 @@ jobs:
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          find immortalwrt/bin/targets/ -type f -name "*sysupgrade.bin" -exec cp -f {} release/NW874-sysupgrade.bin \;
-          find immortalwrt/bin/targets/ -type f -name "*factory.bin" -exec cp -f {} release/NW874-factory.bin \;
+          find immortalwrt/bin/targets/ -type f \( -name "*sysupgrade.bin" -o -name "*factory.bin" \) -exec cp -f {} release/ \;
           cd release
           sha256sum *.bin > sha256sums.txt
           echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
@@ -95,18 +94,25 @@ jobs:
       - name: Clean Old Releases
         if: always()
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api --paginate repos/${{ github.repository }}/releases \
             --jq 'sort_by(.created_at) | reverse | .[5:] | .[]? | "\(.id) \(.tag_name)"' \
             | while read -r id tag; do
-                [ -n "$id" ] && gh api -X DELETE repos/${{ github.repository }}/releases/$id || true
-                [ -n "$tag" ] && gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$tag || true
+                if [ -n "$id" ]; then
+                  gh api -X DELETE repos/${{ github.repository }}/releases/$id || true
+                  gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$tag || true
+                fi
               done
 
       - name: Clean Old Workflow Runs
         if: always()
-        uses: Mattraks/delete-workflow-runs@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          keep_minimum_runs: 5
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run list --repo "${{ github.repository }}" --limit 100 --json databaseId \
+            --jq '.[5:] | .[].databaseId' | while read -r run_id; do
+              if [ -n "$run_id" ]; then
+                gh run delete "$run_id" --repo "${{ github.repository }}" || true
+              fi
+            done
