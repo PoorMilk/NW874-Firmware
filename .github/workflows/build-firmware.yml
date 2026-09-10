@@ -11,34 +11,35 @@ permissions:
 
 env:
   REPO_URL: https://github.com/PoorMilk/NW874-ImmortalWrt
-  REPO_BRANCH: openwrt-24.10-6.6
+  REPO_BRANCH: main
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   TZ: Asia/Shanghai
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -a -f || true
 
       - name: Initialize Environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison gsettings-desktop-schemas python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev libtool python3-pyelftools python3-yaml subversion uglifyjs git asciidoc xmlto gettext xsltproc libz-dev rsync ccache zlib1g-dev gawk unzip libncurses-dev gcc-multilib g++-multilib file wget
+          sudo apt-get install -y build-essential clang flex bison gsettings-desktop-schemas python3-setuptools libglib2.0-dev libgmp3-dev libmpc-dev libmpfr-dev libssl-dev libtool python3-pyelftools python3-yaml subversion uglifyjs git asciidoc xmlto gettext xsltproc libz-dev rsync ccache zlib1g-dev gawk unzip libncurses-dev gcc-multilib g++-multilib file wget python3-ply
           sudo timedatectl set-timezone "${{ env.TZ }}"
-          sudo mkdir -p /workdir
-          sudo chown $USER:$GROUPS /workdir
 
       - name: Clone Source Code
-        working-directory: /workdir
         run: |
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
-          ln -sf /workdir/immortalwrt $GITHUB_WORKSPACE/immortalwrt
 
       - name: Cache DL & Ccache
         uses: actions/cache@v4
@@ -53,13 +54,12 @@ jobs:
       - name: Update Feeds & Execute DIY Scripts
         run: |
           chmod +x ${{ env.DIY_P1_SH }} ${{ env.DIY_P2_SH }}
-          ./${{ env.DIY_P1_SH }}
           cd immortalwrt
+          $GITHUB_WORKSPACE/${{ env.DIY_P1_SH }}
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          cd $GITHUB_WORKSPACE
-          [ -e ${{ env.CONFIG_FILE }} ] && cp -f ${{ env.CONFIG_FILE }} immortalwrt/.config
-          cd immortalwrt
+          [ -e $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
+          echo "CONFIG_CCACHE=y" >> .config
           $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
 
       - name: Download Packages
@@ -77,8 +77,8 @@ jobs:
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          find immortalwrt/bin/targets/ -type f -name "*sysupgrade.bin" -exec cp {} release/NW874-sysupgrade.bin \;
-          find immortalwrt/bin/targets/ -type f -name "*factory.bin" -exec cp {} release/NW874-factory.bin \;
+          find immortalwrt/bin/targets/ -type f -name "*sysupgrade.bin" -exec cp -f {} release/NW874-sysupgrade.bin \;
+          find immortalwrt/bin/targets/ -type f -name "*factory.bin" -exec cp -f {} release/NW874-factory.bin \;
           cd release
           sha256sum *.bin > sha256sums.txt
           echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
