@@ -77,9 +77,14 @@ jobs:
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          find immortalwrt/bin/targets/ -type f \( -name "*sysupgrade.bin" -o -name "*factory.bin" \) -exec cp -f {} release/ \;
+          find immortalwrt/bin/targets/ -type f -exec cp -fv {} release/ \;
           cd release
-          sha256sum *.bin > sha256sums.txt
+          ls -lh
+          if [ "$(ls -A .)" ]; then
+            sha256sum * > sha256sums.txt
+          else
+            exit 1
+          fi
           echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
           echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
