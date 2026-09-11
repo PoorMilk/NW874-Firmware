@@ -1,21 +1,21 @@
-name: Build 360T7 Firmware
+name: "Build 360T7 Firmware"
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
-    - cron: '0 1 * * *'
+    - cron: "0 1 * * *"
 
 permissions:
   contents: write
   actions: write
 
 env:
-  REPO_URL: https://github.com/PoorMilk/NW874-ImmortalWrt
-  REPO_BRANCH: main
-  CONFIG_FILE: .config
-  DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-part2.sh
-  TZ: Asia/Shanghai
+  REPO_URL: "https://github.com/PoorMilk/NW874-ImmortalWrt"
+  REPO_BRANCH: "main"
+  CONFIG_FILE: ".config"
+  DIY_P1_SH: "diy-part1.sh"
+  DIY_P2_SH: "diy-part2.sh"
+  TZ: "Asia/Shanghai"
 
 jobs:
   build:
@@ -38,8 +38,7 @@ jobs:
           sudo timedatectl set-timezone "${{ env.TZ }}"
 
       - name: Clone Source Code
-        run: |
-          git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
+        run: git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
 
       - name: Cache DL & Ccache
         uses: actions/cache@v4
@@ -74,22 +73,16 @@ jobs:
 
       - name: Compile Firmware
         working-directory: ./immortalwrt
-        run: |
-          make -j$(nproc) || make -j1 || make -j1 V=s
+        run: make -j$(nproc) || make -j1 || make -j1 V=s
 
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          
-          # 【调试专用】在日志里搜索并打印 360T7 的真实设备代号
-          echo "==== 查找 360T7 真实的设备代号 ===="
+          echo "==== SEARCHING FOR 360T7 REAL DEVICE NAME ===="
           grep -rn "360" immortalwrt/target/linux/mediatek/image/ || true
-          echo "==================================="
-          
-          # 精确提取所有的 sysupgrade 和 factory 固件文件，忽略两百多个没用的 ipk
+          echo "=============================================="
           find immortalwrt/bin/targets/ -name "*sysupgrade*.bin" -exec cp {} release/ \;
           find immortalwrt/bin/targets/ -name "*factory*.bin" -exec cp {} release/ \;
-          
           cd release
           ls -Rlh
           if [ "$(ls -A .)" ]; then
