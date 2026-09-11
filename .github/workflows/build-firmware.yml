@@ -80,7 +80,16 @@ jobs:
       - name: Prepare Artifacts & Tags
         run: |
           mkdir -p release
-          cp -rf immortalwrt/bin/targets/* release/ || true
+          
+          # 【调试专用】在日志里搜索并打印 360T7 的真实设备代号
+          echo "==== 查找 360T7 真实的设备代号 ===="
+          grep -rn "360" immortalwrt/target/linux/mediatek/image/ || true
+          echo "==================================="
+          
+          # 精确提取所有的 sysupgrade 和 factory 固件文件，忽略两百多个没用的 ipk
+          find immortalwrt/bin/targets/ -name "*sysupgrade*.bin" -exec cp {} release/ \;
+          find immortalwrt/bin/targets/ -name "*factory*.bin" -exec cp {} release/ \;
+          
           cd release
           ls -Rlh
           if [ "$(ls -A .)" ]; then
