@@ -1,0 +1,127 @@
+name: Build 360T7 Firmware (Lite)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 9 * * 5"
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  REPO_URL: "https://github.com/PoorMilk/NW874-ImmortalWrt"
+  REPO_BRANCH: "main"
+  CONFIG_FILE: ".config-lite"
+  DIY_P1_SH: "diy-part1.sh"
+  DIY_P2_SH: "diy-part2.sh"
+  TZ: "Asia/Shanghai"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/share/swift \
+            /usr/local/lib/node_modules /usr/local/share/powershell /usr/local/share/chromium
+          sudo docker image prune -a -f || true
+          sudo apt-get clean
+
+      - name: Initialize Environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y build-essential clang flex bison \
+            gsettings-desktop-schemas python3-setuptools libglib2.0-dev \
+            libgmp3-dev libmpc-dev libmpfr-dev libssl-dev libtool \
+            python3-pyelftools python3-yaml subversion uglifyjs git \
+            asciidoc xmlto gettext xsltproc libz-dev rsync ccache \
+            zlib1g-dev gawk unzip libncurses-dev gcc-multilib \
+            g++-multilib file wget python3-ply
+          sudo timedatectl set-timezone "${{ env.TZ }}"
+
+      - name: Clone Source Code
+        run: git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
+
+      - name: Cache ccache and dl
+        uses: actions/cache@v4
+        with:
+          path: |
+            immortalwrt/dl
+            ~/.ccache
+          key: ${{ runner.os }}-openwrt-${{ hashFiles('immortalwrt/feeds.conf.default') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-
+
+      - name: Update Feeds and Configuration
+        run: |
+          chmod +x ${{ env.DIY_P1_SH }} ${{ env.DIY_P2_SH }}
+          cd immortalwrt
+          $GITHUB_WORKSPACE/${{ env.DIY_P1_SH }}
+          ./scripts/feeds update -a && ./scripts/feeds install -a
+          [ -e $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
+          cat << EOF >> .config
+          CONFIG_CCACHE=y
+          CONFIG_TARGET_ROOTFS_SQUASHFS=y
+          CONFIG_TARGET_ROOTFS_UBIFS=y
+          CONFIG_TARGET_ROOTFS_TARGZ=y
+          EOF
+          $GITHUB_WORKSPACE/${{ env.DIY_P2_SH }}
+
+      - name: Download Packages
+        working-directory: ./immortalwrt
+        run: |
+          make defconfig
+          make download -j8
+          find dl -size -1024c -exec rm -f {} \;
+
+      - name: Compile Firmware
+        working-directory: ./immortalwrt
+        run: make -j$(nproc) || make -j1 V=s
+
+      - name: Organize Release Files
+        run: |
+          mkdir -p release
+          find immortalwrt/bin/targets/ -name "*sysupgrade*.bin" -exec cp {} release/ \;
+          find immortalwrt/bin/targets/ -name "*factory*.bin" -exec cp {} release/ \;
+          cd release
+          [ "$(ls -A .)" ] || exit 1
+          echo "TAG_NAME=360T7-Lite-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
+          echo "RELEASE_NAME=360T7 ImmortalWrt Lite $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 360T7_Lite_Firmware_${{ env.TAG_NAME }}
+          path: release/*
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          tag_name: ${{ env.TAG_NAME }}
+          name: ${{ env.RELEASE_NAME }}
+          make_latest: true
+          generate_release_notes: false
+
+      - name: Cleanup Old Releases and Runs
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --paginate repos/${{ github.repository }}/releases \
+            --jq 'sort_by(.created_at) | reverse | .[6:] | .[]? | "\(.id) \(.tag_name)"' | \
+          while read -r id tag; do
+            [ -n "$id" ] && gh api -X DELETE repos/${{ github.repository }}/releases/$id || true
+            [ -n "$tag" ] && gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$tag || true
+          done
+          gh run list --repo "${{ github.repository }}" --limit 100 --json databaseId \
+            --jq '.[6:] | .[].databaseId' | while read -r run_id; do
+            [ -n "$run_id" ] && gh run delete "$run_id" --repo "${{ github.repository }}" || true
+          done
