@@ -1,9 +1,9 @@
-name: Build 360T7 Firmware
+name: Build 360T7 Firmware (Full)
 
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "0 18 * * 5"
+    - cron: "0 4 * * 5"
 
 permissions:
   contents: write
@@ -92,13 +92,13 @@ jobs:
           find immortalwrt/bin/targets/ -name "*factory*.bin" -exec cp {} release/ \;
           cd release
           [ "$(ls -A .)" ] || exit 1
-          echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
-          echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
+          echo "TAG_NAME=360T7-Full-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
+          echo "RELEASE_NAME=360T7 ImmortalWrt Full $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 360T7_Firmware_${{ env.TAG_NAME }}
+          name: 360T7_Full_Firmware_${{ env.TAG_NAME }}
           path: release/*
 
       - name: Create Release
@@ -116,12 +116,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api --paginate repos/${{ github.repository }}/releases \
-            --jq 'sort_by(.created_at) | reverse | .[5:] | .[]? | "\(.id) \(.tag_name)"' | \
+            --jq 'sort_by(.created_at) | reverse | .[6:] | .[]? | "\(.id) \(.tag_name)"' | \
           while read -r id tag; do
             [ -n "$id" ] && gh api -X DELETE repos/${{ github.repository }}/releases/$id || true
             [ -n "$tag" ] && gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$tag || true
           done
           gh run list --repo "${{ github.repository }}" --limit 100 --json databaseId \
-            --jq '.[5:] | .[].databaseId' | while read -r run_id; do
+            --jq '.[6:] | .[].databaseId' | while read -r run_id; do
             [ -n "$run_id" ] && gh run delete "$run_id" --repo "${{ github.repository }}" || true
           done
