@@ -92,8 +92,8 @@ jobs:
           find immortalwrt/bin/targets/ -name "*factory*.bin" -exec cp {} release/ \;
           cd release
           [ "$(ls -A .)" ] || exit 1
-          echo "TAG_NAME=360T7-Full-$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
-          echo "RELEASE_NAME=360T7 ImmortalWrt Full $(date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
+          echo "TAG_NAME=360T7-$(date +'%Y%m%d%H%M')-Full" >> $GITHUB_ENV
+          echo "RELEASE_NAME=360T7 ImmortalWrt $(date +'%Y-%m-%d %H:%M') Full" >> $GITHUB_ENV
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
